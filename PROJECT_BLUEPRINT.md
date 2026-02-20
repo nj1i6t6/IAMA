@@ -1,137 +1,207 @@
-# IAMA (Intelligent Architecture Migration Assistant) - Ultimate Blueprint v4.2
+IAMA - Ultimate Blueprint v6.0 (Production SaaS Edition)
 
-> **Status:** Execution Ready (工程落地版)
-> **Positioning:** Enterprise Software Evolution OS (企業級軟體演進作業系統)
-> **Philosophy:** "Code is Data, Migration is Computation, Safety is Mathematical."
-> **Strategy:** LSP-First Headless Core + Hybrid Data Plane + Graph-Native Intelligence
+Positioning: AI-Powered Legacy Code Modernization Platform (SaaS + IDE Client)
+Core Philosophy: "Behavior-Driven Translation (BDD) 
+→
+→
+ Test-Driven Execution (TDD) 
+→
+→
+ Self-Healing Generation."
+Architecture Style: Event-Driven Orchestration with Centralized Cloud Processing.
 
----
+1. System Topology (End-to-End)
 
-## 1. North Star Metrics (北極星指標)
-我們關注確定性、成本與效率的平衡。
+The platform is divided into two primary environments: the Client IDE (VS Code) and the IAMA Cloud Backend (SaaS).
 
-1.  **Zero-Touch Migration Rate (ZTM):** 無需人工修改代碼即可通過測試並上線的變更比例 (Target: 80%)。
-2.  **Behavioral Consistency Score (BCS):** 透過 Shadow Mode 驗證新舊系統在相同輸入下，輸出完全一致的比例 (Target: 99.999%)。
-3.  **Cost Per Migration Unit (CPMU):** 平均每遷移 1000 行代碼所需的 Token 與運算成本。
-4.  **Human Correction Rejection Rate (HCR):** AI 學習人工修正後，不再犯同樣錯誤的比例。
+1.1 The Client: VS Code Extension (Presentation & Context Layer)
 
----
+Role: The user's entry point. Handles local file system access and rich UI presentation.
 
-## 2. System Architecture: The Distributed Neural Core
+Tech Stack: TypeScript, VS Code Extension API, React (Webview API).
 
-### Layer 1: The Adaptive Interface (Protocol Layer)
-- **Core Protocol:** Strictly follows **LSP (Language Server Protocol)** standard.
-- **Visual Protocol Extension (Rich UI Overlay):**
-    - **Mechanism:** Uses **VS Code Webview API** as a canvas, running **React Flow** or **Cytoscape.js** internally.
-    - **Communication:** Async communication via `postMessage`.
-    - **Optimization:** Sends **Delta Updates** only to avoid JSON serialization overhead.
-- **Data Pipe (GraphQL):** Aggregated queries for the SaaS Dashboard.
+Core Responsibilities:
 
-### Layer 2: The Intelligence Swarm (Multi-Agent Brain)
-- **Architect Agent (Planner):**
-    - **Incremental Graph Parsing:** Parses only `git diff` changes to update the subgraph, avoiding timeouts on large repos.
-    - **Graph-Native Retrieval:** Uses **K-Hop Neighbor** algorithms to extract Minimal Context via GraphRAG.
-- **Coder Agent (Executor):** Generates code modifications with Feedback Memory.
-- **Reviewer Agent (Critic):** Enforces linters and architectural rules.
-- **Guardian Agent (Security):** Scans for dependency vulnerabilities (SCA).
+Authentication: OAuth/JWT login flow.
 
-### Layer 3: The Execution Sandbox (Edge-Smart Hybrid Plane)
-- **Edge Intelligence:** AST Parsing, Static Analysis, and Vector Embedding happen inside the **Customer's Local MicroVM**.
-- **Privacy-First Transmission:** Only **Vectors** and **Anonymized Metadata** are sent to the SaaS Control Plane. Raw code never leaves the VPC.
-- **Secure Tunnel:** Worker initiates **mTLS Outbound** connection (No Inbound ports required).
+Context Gathering: User right-clicks a folder/file -> "Refactor with IAMA". The extension zips the target code and uploads it to the SaaS.
 
-### Layer 4: The Commercial & Memory Core
-- **Code Graph (Neo4j):** Stores AST dependencies and impact scope.
-- **Vector Index (Qdrant):** Stores code intent and **Anonymous Structural Patterns**.
-- **Usage Metering:** Records "Migration Operations" for usage-based billing.
-- **Seat Management:** Controls concurrent IDE plugin sessions.
+Interactive UI (React Webview): Displays the multi-step wizard (Proposals 
+→
+→
+ BDD Checklist 
+→
+→
+ Live Terminal 
+→
+→
+ Diff Viewer).
 
----
+IPC Communication: Uses vscode.postMessage to communicate between the Extension Host (Node.js) and the Webview (React).
 
-## 3. The Four Core Engines
+1.2 The Cloud: IAMA SaaS Backend (Execution & Intelligence Layer)
 
-### 3.1 Module A: Analysis & Incremental Parsing
-- **Hybrid Parsing:** Tree-sitter (Skeleton) + LLM Embedding (Flesh).
-- **Incremental Strategy:**
-    - **Initial Import:** Full parsing (Background Async).
-    - **Dev Loop:** **On-Save / On-Commit** triggers incremental parsing, updating only affected AST nodes.
+Role: The heavy-lifting engine. Processes code, communicates with LLMs, and runs sandboxed tests.
 
-### 3.2 Module B: Hybrid Orchestration
-- **Pre-Flight Cost Estimator:** Calculates estimated Token cost (e.g., "$15.5") before execution; requires user approval if over budget.
-- **Tiered Inference Strategy:**
-    - **Tier 1 (Rule-based):** OpenRewrite/Codemod (80% traffic, zero cost).
-    - **Tier 2 (Small Model):** Llama-3-70B / GPT-4o-mini.
-    - **Tier 3 (Reasoning Model):** Claude 3.5 Sonnet / GPT-4o.
-- **HITL with Memory:** Few-Shot Learning from user corrections.
+Tech Stack: Python 3.12+, FastAPI, PostgreSQL, Temporal.io, Docker SDK.
 
-### 3.3 Module C: Safe Verification & Adaptation
-- **Side-Effect Free Shadow Mode:**
-    - **Read Traffic:** Direct Replay.
-    - **Write Traffic:** Redirects to **Copy-on-Write DB Snapshot** or Mocked Services.
-- **Sandboxed ETL Generator (Schema Adaptation):**
-    - Generates Python/JS scripts to map data between old and new schemas.
-    - **Dry-Run Data Validator (The Safety Net):**
-        1.  **Sampling:** Select 100 real records.
-        2.  **Trial Run:** Execute mapping in sandbox.
-        3.  **Invariant Check:** Verify total amounts, foreign keys, etc.
-        4.  **Result:** Full execution allowed ONLY after Dry-Run passes.
+Microservices Breakdown:
 
-### 3.4 Module D: Governance & Ecosystem
-- **Policy-as-Code:** Agent enforces enterprise architectural rules.
-- **Anonymous Structural Patterns:** Sharing AST transformation logic with Differential Privacy.
+API Gateway (FastAPI): Handles HTTP requests, JWT validation, file uploads (S3/Local Storage), and acts as the Temporal Client.
 
----
+Relational DB (PostgreSQL): Stores user accounts, subscription tiers, and migration job metadata.
 
-## 4. Engineering Guardrails (Implementation Risks)
+Orchestration Core (Temporal Server & Workers): Manages the state machine. Ensures long-running refactoring jobs survive server restarts.
 
-> **WARNING:** These are critical traps to avoid during Phase 1.
+Test Sandbox (Docker): Ephemeral containers spun up to execute generated pytest/jest code safely.
 
-1.  **GraphRAG Performance Trap:**
-    - **Risk:** Full graph construction for million-line repos is too slow.
-    - **Solution:** Strict **Lazy Loading** and **Incremental Parsing**. Do not build the full graph on startup.
+2. Data Model & Schema (PostgreSQL / SQLAlchemy)
 
-2.  **Schema Adaptation Complexity:**
-    - **Risk:** Auto-generated ETL scripts may corrupt data.
-    - **Solution:** Enforce **Human-in-the-Loop** review for all mapping logic in Phase 1 & 2. Do not automate execution without approval.
+To support a multi-tenant SaaS, the database must track state across the entire refactoring lifecycle.
 
-3.  **Webview Communication Overhead:**
-    - **Risk:** Passing large AST JSONs between Extension Host and Webview causes UI lag.
-    - **Solution:** Send only **Render Props** (coordinates, labels, colors). Keep logic in Rust/Extension Host.
+User Table: id, email, hashed_password, subscription_tier, created_at.
 
----
+Project Table: id, user_id, project_name, language, framework.
 
-## 5. Technology Stack
+RefactorJob Table:
 
-| Component | Technology | Reasoning (First Principles) |
-| :--- | :--- | :--- |
-| **Frontend** | **Next.js 15 (App Router)** | Standard for complex state & SSR. |
-| **Backend API** | **Python (FastAPI)** | Native AI/LangChain integration; high async performance. |
-| **LSP Server** | **Rust** | Extreme performance for AST parsing & memory safety. |
-| **IDE UI** | **React Flow** | Efficient node-based rendering in Webview. |
-| **Orchestration** | **Temporal.io** | Durable execution for long-running workflows. |
-| **Sandbox** | **AWS Firecracker** | Millisecond-level isolation (MicroVMs). |
-| **Graph DB** | **Neo4j** | Standard for dependency graph & GraphRAG. |
-| **Vector DB** | **Qdrant** | High-performance vector search. |
-| **Validator** | **Pandas / Great Expectations** | Data quality checks for Dry-Run. |
+id, project_id, status (PENDING, ANALYZING, WAITING_USER, REFACTORING, SUCCESS, FAILED).
 
----
+original_code_path, refactored_code_path.
 
-## 6. Execution Roadmap
+retry_count (int, max 10).
 
-### Phase 0: The "Wizard of Oz" Validation (Weeks 1-2)
-- **Goal:** Prove the "Analysis -> Migration" logic works manually before building the engine.
-- **Method:** Python Scripts + Manual Claude API calls + Human Review.
-- **Deliverable:** A documented Prompt Chain that successfully refactors a module.
+BDD_Behavior Table: id, job_id, description (e.g., "Given X, When Y, Then Z"), is_approved (boolean).
 
-### Phase 1: The Headless Brain (SaaS MVP) (Weeks 3-12)
-- **Goal:** End-to-end automation of Phase 0 logic.
-- **Key Tech:** LSP Protocol, Temporal Workflows, **Incremental Parsing**.
-- **Deliverable:** "Hello World" Migration running on the full stack.
+3. Communication Protocol (API & Real-time)
+REST Endpoints (FastAPI)
 
-### Phase 2: The Safe Enterprise (BYOC & Shadow) (Month 4-6)
-- **Goal:** Enterprise trust & billing.
-- **Key Tech:** Firecracker Sandbox, **Dry-Run Validator**, Usage Metering.
+POST /api/v1/auth/login 
+→
+→
+ Returns JWT.
 
-### Phase 3: The Ecosystem (IDE & Evolution) (Month 7+)
-- **Goal:** Developer adoption.
-- **Key Tech:** VS Code **Visual Overlay**, Marketplace, Federated Learning.
+POST /api/v1/jobs/upload 
+→
+→
+ Accepts ZIP file, creates RefactorJob, triggers Temporal Workflow, returns job_id.
+
+GET /api/v1/jobs/{job_id} 
+→
+→
+ Returns current job status and metadata.
+
+POST /api/v1/jobs/{job_id}/bdd/approve 
+→
+→
+ Sends a Temporal Signal to resume the workflow after the user edits/approves the BDD list.
+
+Real-time Logs (Server-Sent Events / SSE)
+
+GET /api/v1/jobs/{job_id}/stream 
+→
+→
+ Pushes real-time terminal logs (e.g., "Generating tests...", "Test Failed: retrying (1/10)") to the VS Code Webview.
+
+4. The Core Workflow: "The Safety Net" (Temporal State Machine)
+
+This is the exact sequence of Temporal Activities. The Workflow is deterministic, and the UI reacts to its current state.
+
+Phase 1: Ingestion & Strategy Proposal
+
+Activity: AnalyzeLegacyCode: Parses the uploaded code to detect the tech stack and complexity.
+
+Activity: GenerateProposals: LLM generates three tailored reports:
+
+Beginner: Simple framework recommendations (Understandability).
+
+Professional: Deep architectural trade-offs (Performance/Memory).
+
+Enterprise: ROI estimation and risk analysis (Cost reduction).
+
+Pause: Workflow waits for user selection via VS Code UI.
+
+Phase 2: BDD Behavior Extraction (Human-in-the-Loop)
+
+Activity: ExtractBDD: LLM translates legacy code into a human-readable business behavior list.
+
+Signal: WaitForBDDApproval: The workflow pauses (workflow.wait_condition). The VS Code UI displays the checklist.
+
+Human Interaction: The user reviews the list. If they type "You missed the holiday rule", the Extension calls an API to update the DB, and the AI regenerates the list. Once satisfied, the user clicks "Confirm". The API sends a Signal to Temporal to resume.
+
+Phase 3: TDD Baseline & The Self-Healing Loop
+
+Activity: GenerateTDD: LLM converts the approved BDD list into standard unit tests (e.g., Pytest).
+
+Activity: RunSandboxTests(OldCode): Docker executes the tests against the legacy code to prove the tests are valid (Baseline Proof).
+
+Activity: RefactorCode: LLM rewrites the source code using the strategy chosen in Phase 1.
+
+The 10-Retry Loop:
+
+Docker executes the tests against the new code.
+
+If Success: Break loop. Proceed to Phase 4.
+
+If Failed:
+
+Capture stderr (Stack trace).
+
+Activity: AnalyzeFailureAndPatch: Pass the stderr and the failed code back to the LLM. LLM generates a patch.
+
+Increment retry_count. Loop back to execution. Max 10 times.
+
+Phase 4: Fallback & Delivery
+
+Success: ZIP the refactored code. Send URL to VS Code extension. Extension opens a Git-style Diff view.
+
+Fallback (Fail > 10): Return the partially working code. Highlight the specific TDD tests that failed. Open a direct Chat UI in VS Code for the user to manually guide the AI or edit the code directly.
+
+5. Mock & Development Strategy (Zero-Cost Dev Phase)
+
+Since the system must be fully runnable locally without real LLM API keys, we use the Adapter Pattern (Dependency Injection).
+
+5.1 The Interface (core/llm/base.py)
+code
+Python
+download
+content_copy
+expand_less
+class BaseLLMProvider(ABC):
+    @abstractmethod
+    async def generate_proposals(self, code: str) -> dict: pass
+    
+    @abstractmethod
+    async def extract_bdd(self, code: str) -> list: pass
+    
+    @abstractmethod
+    async def generate_code(self, code: str, bdd: list) -> str: pass
+5.2 The Mock Implementation (core/llm/mock_adapter.py)
+
+The Agent must implement MockLLMProvider which reads from static JSON files.
+
+When extract_bdd() is called, it sleeps for 2 seconds (to simulate latency) and returns a hardcoded list of 4 BDD rules.
+
+When generate_code() is called during the retry loop, it is programmed to return a failing code block on the 1st iteration, and a passing code block on the 2nd iteration, ensuring the developer can see the UI react to the "Self-Healing" process.
+
+5.3 Sandbox Mocking (core/sandbox/mock_docker.py)
+
+Instead of spinning up actual Docker containers locally during UI development, the MockSandbox will simply check the loop iteration:
+
+Attempt 1: Returns {"status": "failed", "stderr": "AssertionError: Expected 900, got 1000"}.
+
+Attempt 2: Returns {"status": "success", "stderr": ""}.
+
+6. Deployment Architecture (Cloud Ready)
+
+When moving to production, the SaaS backend is deployed using docker-compose or Kubernetes on the owner's server:
+
+Nginx Reverse Proxy: Handles SSL termination and routes /api to FastAPI.
+
+FastAPI Container: Gunicorn + Uvicorn workers.
+
+PostgreSQL Container: Persistent volume for user data.
+
+Temporal Cluster: Temporal Web UI, Temporal Server, Elasticsearch (for workflow indexing), and Cassandra/PostgreSQL for Temporal state.
+
+Temporal Worker Container: The Python workers that execute the Heavy LLM tasks and interact with the Docker daemon via /var/run/docker.sock to spawn Sandbox containers.

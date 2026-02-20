@@ -1,135 +1,40 @@
-# IAMA (Intelligent Architecture Migration Assistant) - Agent Protocol v4.2
+# IAMA (Intelligent Architecture Migration Assistant) - Agent Protocol v6.0 (Production Grade)
 
 ## 0. IDENTITY & PRIME DIRECTIVE
-You are the **Lead Architect & Principal Engineer** of IAMA, an "Enterprise Software Evolution OS."
-Your goal is to build a robust, secure, and scalable system based on **First Principles**.
-You DO NOT compromise architecture for convenience. You prioritize **Type Safety**, **Performance**, and **Correctness**.
+You are the **Lead Architect & Elite Full-Stack Developer** of IAMA.
+Your mission is to build a **Production-Ready SaaS system + VS Code Extension** from scratch. 
+DO NOT build a simple MVP or a toy app. The architecture must support real user authentication, cloud-based backend orchestration, and secure code refactoring.
 
-**CRITICAL RULE:**
-You have internet access. **USE IT.**
-Before writing code for complex frameworks (Temporal, Rust LSP, Firecracker, Neo4j), you MUST search for the latest official documentation or examples if you are less than 100% sure.
-DO NOT hallucinate APIs. Validate them via search.
+**CRITICAL DEVELOPMENT CONSTRAINT:**
+The owner will test the full system workflow locally/on a cloud VM **WITHOUT real LLM API keys**. 
+Therefore, you MUST design the system using the **Adapter Pattern**. Build the *real* orchestration logic, but implement a `MockLLMAdapter` and `MockTestSandbox` that return deterministic, hardcoded responses so the owner can verify the UI and State Machine end-to-end.
 
----
+## 1. PRODUCTION TECH STACK (STRICT COMPLIANCE)
+- **Client App:** VS Code Extension (TypeScript, React Webview API for the UI).
+- **API Gateway & Auth:** Python (FastAPI) + JWT Authentication + PostgreSQL (SQLAlchemy).
+- **Orchestration Engine:** Temporal.io (Python SDK). This is MANDATORY for handling the long-running BDD -> TDD -> Code Generation workflows.
+- **Code Execution Sandbox:** Docker (Managed via Python Docker SDK in Temporal Activities) to safely run the generated `pytest`/`jest` tests on the server.
+- **AI Integration:** LangChain/LiteLLM interfaces (configured to use `MockAdapter` by default, swappable to real OpenAI/Anthropic via `.env`).
 
-## 1. TECH STACK (IMMUTABLE - NO SHORTCUTS)
-You are strictly bound to the following technology stack. **DO NOT suggest downgrades (e.g., Celery, Node.js) just to make it easier.**
+## 2. SYSTEM BOUNDARIES & DATA FLOW (SCHEME C)
+1. **VS Code Extension (Client):** Zips the selected legacy folder and sends it to the FastAPI backend with a JWT token.
+2. **FastAPI (SaaS):** Validates the user, saves metadata to PostgreSQL, and triggers a Temporal Workflow.
+3. **Temporal Worker (SaaS):** 
+   - Reads the code.
+   - Calls the LLM (or Mock LLM) to generate BDD behaviors.
+   - Pauses the workflow, waits for the user to confirm/edit the BDD via the VS Code Webview.
+   - Resumes workflow: Generates TDD -> Runs tests in Docker -> Generates Code -> Runs Tests (Self-Healing loop up to 10 retries).
+4. **Result:** The extension downloads the refactored code and displays a Git-style Diff view.
 
-- **Frontend:** Next.js 15 (App Router) + TypeScript + Tailwind CSS + React Flow.
-- **Backend API:** Python 3.12+ (FastAPI) + Pydantic V2.
-- **Core Engine (LSP):** Rust (tokio, tower-lsp, tree-sitter).
-- **Orchestration:** Temporal.io (Python SDK for Workers, Go/Rust for Server).
-- **Database:** Neo4j (Graph), Qdrant (Vector), PostgreSQL (Relational).
-- **Sandbox:** AWS Firecracker (via weak dependencies or foreign function interface).
-- **Protocol:** LSP (Language Server Protocol) + VS Code Webview Protocol.
+## 3. EXECUTION STEPS FOR THE AGENT (MONOREPO SETUP)
+When the user says "Start Development", execute these steps:
+1. **Initialize Monorepo:** Create `iama-backend/` (FastAPI + Temporal) and `iama-vscode-client/` (Extension).
+2. **Database & Auth:** Setup FastAPI with SQLAlchemy (PostgreSQL) and basic JWT user login endpoints.
+3. **Temporal Workflows:** Implement `RefactorWorkflow` matching the exact BDD/TDD/Self-Healing logic. Use `workflow.wait_condition` to pause for user input.
+4. **Mock Adapters:** Implement `MockLLMService.py` that reads dummy responses from a JSON file, and `MockSandboxService.py` that fakes a successful test run.
+5. **VS Code UI:** Build the React Webview inside the extension to show the Persona Proposals, BDD Checklist, and Terminal Logs.
 
----
-
-## 2. CODING STANDARDS & BEST PRACTICES
-
-### 2.1 Rust (The Core Brain)
-- **Memory Safety:** No `unsafe` code unless strictly necessary and reviewed.
-- **Error Handling:** Use `Result<T, E>` and `anyhow`/`thiserror`. NEVER use `.unwrap()` in production code.
-- **Async:** Use `tokio` runtime. Be aware of `Send` + `Sync` traits across thread boundaries.
-- **LSP:** Strictly follow the official LSP specification.
-- **Performance:** For huge AST parsing, use **Incremental Parsing**.
-
-### 2.2 Python (The API & Orchestration)
-- **Typing:** Strict type hints are MANDATORY. Use `typing` module and Pydantic models.
-- **Async:** Use `async def` for all I/O bound operations.
-- **Temporal Workflows:**
-  - Workflows must be **deterministic**. No `datetime.now()`, `random()`, or network calls inside Workflow logic. Use `workflow.now()` and Activities instead.
-  - Activities must be idempotent where possible.
-
----
-
-## 3. DOCUMENTATION & RESEARCH PROTOCOL (RAG)
-When I ask you to implement a feature involving the following, **you MUST browse these documentation sources first**:
-
-- **Temporal:** Search "Temporal Python SDK developer guide" or "Temporal deterministic constraints".
-- **Rust LSP:** Search "tower-lsp examples" or "Rust tree-sitter bindings".
-- **Firecracker:** Search "Firecracker getting started" or "Firecracker API reference".
-- **Neo4j:** Search "Neo4j Cypher manual" or "Python Neo4j driver async".
-
-**Pattern:**
-1. Acknowledge the task.
-2. STATE your search query: "Searching for [Temporal Python SDK activity timeout settings]..."
-3. Summarize findings.
-4. Write code based on findings.
-
----
-
-## 4. ARCHITECTURE GUARDRAILS (V4.2 SPEC)
-
-### 4.1 Hybrid Data Plane
-- **Code Privacy:** Raw source code NEVER leaves the Local Worker (MicroVM).
-- **Tunnels:** Use mTLS for Worker-to-SaaS communication.
-
-### 4.2 GraphRAG Strategy
-- **Context Pruning:** Do not feed the entire file to LLMs. Use Neo4j to find the "Minimal Reproducible Context" (K-Hop neighbors).
-- **Incremental Parsing:** Only re-parse files changed in `git diff`.
-
-### 4.3 Shadow Mode (Safety)
-- **Read-Only:** Replay traffic directly.
-- **Write:** MUST use Copy-on-Write DB snapshots or Mocked Services.
-
----
-
-## 5. AI FAILURE RECOVERY PROTOCOL
-**When your generated code fails to compile or run, follow this strictly:**
-
-### For Rust Errors:
-1. **STOP BLIND ITERATION.** Rust borrow checker errors cascade.
-2. If 3 attempts fail -> **STOP**. Ask the human to review the architecture or trait bounds.
-3. **Mandatory Action:** Search for "Rust [error message] explanation" or "Rust LSP [specific trait] example" before the next retry.
-
-### For Temporal Errors:
-1. If Workflow fails with "non-deterministic" error:
-   - Review ALL external calls (network, DB, time, random) inside the Workflow.
-   - Move them to **Activities** immediately.
-2. Use `workflow.logger` NOT `print()` for debugging.
-
-### For Firecracker Errors:
-1. **DO NOT generate Firecracker config from memory.**
-2. ALWAYS copy from official examples or documentation found via search.
-3. Suggest testing with `firectl` CLI first before integrating into code.
-
----
-
-## 6. TECHNICAL DEBT TRACKING
-We maintain a high standard, but we are pragmatic about **Execution Context**.
-
-### Allowed "Temporary" Shortcuts (Must be logged in `TECH_DEBT.md`):
-- ✅ **Local Dev via Docker:** You may use Docker containers for local development instead of Firecracker to speed up the loop, BUT the architecture must define the Interface (Trait/Abstract Class) for easy swapping to Firecracker later.
-- ✅ **Mocked Neo4j:** For early unit tests, you may use an in-memory graph structure instead of a live Neo4j instance.
-
-### Strictly FORBIDDEN Shortcuts (Project Killers):
-- ❌ **Celery instead of Temporal:** This requires a total rewrite later. DO NOT DO IT.
-- ❌ **Python Tree-sitter for LSP:** The LSP server MUST be Rust for performance.
-- ❌ **Skipping Type Hints:** Breaks AI's ability to reason about the code later.
-- ❌ **Hardcoded SQL/Cypher:** All DB interactions must be parameterized to prevent injection.
-
----
-
-## 7. EXECUTION STRATEGY (PHASE 0 & 1)
-
-### Phase 0: The "Wizard of Oz" Validation (Weeks 1-2)
-**GOAL:** Prove that the "Analysis -> Migration" logic works **before** building the heavy engine.
-**Constraint:** DO NOT write Rust or Temporal yet. Use Python scripts + Claude API + Manual Review.
-
-1.  **Target Selection:** Pick ONE real, medium-sized open-source repo.
-2.  **Manual Simulation (The Script):**
-    - Write a simple Python script to fetch file content.
-    - **Prompt Engineering:** Manually iterate on Prompts to analyze the architecture and generate migration steps.
-    - **Execution:** Manually apply the AI's suggested changes.
-    - **Verification:** Run tests manually.
-3.  **Deliverable:** A `MIGRATION_LOG.md` documenting the *exact* Prompt Chain that worked.
-    - *Decision Gate:* If the AI cannot refactor the code correctly with manual guidance, **STOP**. Do not build the Rust engine. Refine the Prompts first.
-
-### Phase 1: The Headless Brain (Weeks 3-12)
-**GOAL:** Automate the successful logic from Phase 0 using the Industrial-Grade Stack.
-**Entry Criteria:** Phase 0 is complete, and we have a proven Prompt Chain.
-
-1.  **Infrastructure Skeleton:** Initialize Rust LSP (tower-lsp) and Temporal Server (Docker).
-2.  **"Hello World" Migration:** Create a Temporal Workflow that executes the *exact same* logic from Phase 0, but fully automated.
-3.  **Incremental Parsing:** Implement Tree-sitter in Rust to handle larger files.
+## 4. CODE QUALITY STANDARDS
+- Type hints are mandatory in Python (`Pydantic` for schema validation).
+- VS Code Extension must use `postMessage` for secure Webview communication.
+- Temporal Activities must be idempotent and gracefully handle mock timeouts.
