@@ -1,0 +1,134 @@
+{
+    "name": "iama-extension",
+    "displayName": "IAMA — Intelligent Autonomous Multi-Agent Refactoring",
+    "description": "AI-powered refactoring assistant for VS Code",
+    "version": "1.0.0",
+    "publisher": "iama",
+    "engines": {
+        "vscode": "^1.87.0"
+    },
+    "categories": [
+        "Programming Languages",
+        "Machine Learning"
+    ],
+    "activationEvents": [
+        "onStartupFinished"
+    ],
+    "main": "./dist/extension.js",
+    "contributes": {
+        "commands": [
+            {
+                "command": "iama.startRefactor",
+                "title": "IAMA: Start Refactor",
+                "icon": "$(play)"
+            },
+            {
+                "command": "iama.login",
+                "title": "IAMA: Sign In"
+            },
+            {
+                "command": "iama.logout",
+                "title": "IAMA: Sign Out"
+            },
+            {
+                "command": "iama.openDashboard",
+                "title": "IAMA: Open Dashboard"
+            },
+            {
+                "command": "iama.cancelJob",
+                "title": "IAMA: Cancel Current Job"
+            },
+            {
+                "command": "iama.viewJobHistory",
+                "title": "IAMA: View Job History"
+            },
+            {
+                "command": "iama.applyDelivery",
+                "title": "IAMA: Apply Refactoring"
+            },
+            {
+                "command": "iama.revertDelivery",
+                "title": "IAMA: Revert Refactoring"
+            },
+            {
+                "command": "iama.openInterventionPanel",
+                "title": "IAMA: Open Intervention Panel"
+            }
+        ],
+        "viewsContainers": {
+            "activitybar": [
+                {
+                    "id": "iama",
+                    "title": "IAMA",
+                    "icon": "$(robot)"
+                }
+            ]
+        },
+        "views": {
+            "iama": [
+                {
+                    "id": "iama.dashboard",
+                    "name": "Dashboard"
+                },
+                {
+                    "id": "iama.jobStatus",
+                    "name": "Job Status"
+                },
+                {
+                    "id": "iama.history",
+                    "name": "History"
+                }
+            ]
+        },
+        "menus": {
+            "editor/context": [
+                {
+                    "command": "iama.startRefactor",
+                    "group": "iama@1",
+                    "when": "editorHasSelection"
+                }
+            ]
+        },
+        "configuration": {
+            "title": "IAMA",
+            "properties": {
+                "iama.apiBaseUrl": {
+                    "type": "string",
+                    "default": "http://localhost:3000",
+                    "description": "IAMA API server URL"
+                },
+                "iama.executionMode": {
+                    "type": "string",
+                    "enum": [
+                        "LOCAL_NATIVE",
+                        "LOCAL_DOCKER"
+                    ],
+                    "default": "LOCAL_NATIVE",
+                    "description": "Execution mode for local jobs"
+                }
+            }
+        },
+        "uriHandler": {
+            "description": "Handle vscode://iama.extension/ deep links (OAuth callback)"
+        }
+    },
+    "scripts": {
+        "vscode:prepublish": "npm run build",
+        "build": "tsc --project tsconfig.json",
+        "dev": "tsc --project tsconfig.json --watch",
+        "lint": "eslint src --ext .ts",
+        "test": "vscode-test"
+    },
+    "dependencies": {
+        "@microsoft/fetch-event-source": "^2.0.1",
+        "uuid": "^9.0.1"
+    },
+    "devDependencies": {
+        "@types/node": "^20.11.30",
+        "@types/uuid": "^9.0.8",
+        "@types/vscode": "^1.87.0",
+        "@vscode/test-cli": "^0.0.6",
+        "@vscode/test-electron": "^2.3.9",
+        "typescript": "^5.4.3"
+    }
+}

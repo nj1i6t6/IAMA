@@ -1,40 +1,43 @@
 # IAMA V1 Development Tasks
 
-- [ ] Phase 1: Platform Foundations & Core Infrastructure
-  - [ ] Initialize Node.js + Fastify API
-  - [ ] Initialize PostgreSQL Database Schema via migration runner
-  - [ ] Deploy Temporal.io Cluster (Docker Compose) and Python Worker placeholder
-  - [ ] Implement `IamaLLMRouter` (LiteLLM Python layer) inside Temporal workers
-  - [ ] Implement `dynamic_configs` features (model.l1, tier_context_caps, feature flags)
-- [ ] Phase 2: Authentication, Subscription & Billing
-  - [ ] Implement Auth Service (`users`, `oauth_accounts`, `POST /register`, `POST /login`, OAuth initiate/callback with auto-merge)
-  - [ ] Implement JWT Lifecycle (access vs refresh tokens)
-  - [ ] Implement Stripe Billing Foundation (`payment_subscriptions` mirror, `subscription_tiers` enforcement)
-  - [ ] Implement Quota Management (`GET /api/v1/usage/summary`, `pg_advisory_xact_lock` for usage_ledger)
-- [ ] Phase 3: Job Lifecycle & Context Assembly
-  - [ ] Implement Job Service (`POST /api/v1/jobs`, `GET /api/v1/jobs/:job_id`)
-  - [ ] Implement Heartbeat Tracker (`POST /api/v1/jobs/:job_id/heartbeat`, 300s grace window)
-  - [ ] Implement Context Slices & Two-Level AST Pruning (Extension Level 1 + Cloud `analyzeScope` level 2)
-  - [ ] Implement Pre-flight Token Calculation (tiktoken x 2.2 buffer) & Per-Model LiteLLM Counter
-  - [ ] Implement SSE Log Streaming (`@microsoft/fetch-event-source` pattern)
-- [ ] Phase 4: Strategy Proposals & Specs
-  - [ ] Implement Proposal Generation via L1 model (Conservative, Standard, Comprehensive)
-  - [ ] Implement Spec Management (`spec_revisions`, `PATCH /spec` with `revision_token` optimistic lock)
-  - [ ] Implement NL-to-Spec Conversion (`POST /spec/nl-convert` via L2 model)
-- [ ] Phase 5: Test Generation & Baseline Validation
-  - [ ] Implement Testing Pipelines (L1 model, Assertion & Characterization, Black-Box fallback)
-  - [ ] Implement Temporal Async Activity Completion (TaskToken generation -> IDE SSE -> IDE Extension execution)
-  - [ ] Implement IDE Test Reporting (`POST /sandbox/report` -> API `AsyncCompletionClient.complete`)
-- [ ] Phase 6: Refactor Loop, Self-Healing & Interventions
-  - [ ] Implement Patch Mechanism (L2 model, `patch_edit_schema` strict enforcement)
-  - [ ] Implement Self-Healing Loop (3 identical errors -> `WAITING_INTERVENTION` trigger)
-  - [ ] Implement Deep Fix Flow (L3 model via `POST /intervention/deep-fix`, 1800s timeout)
-- [ ] Phase 7: Delivery, Revert & Billing Checkpoints
-  - [ ] Implement Delivery Management (Shadow FS Diff, `vscode.diff()` compatible delivery artifact)
-  - [ ] Implement Delivery Application (`POST /api/v1/jobs/:job_id/delivery/accept`, accept hunk symbols, partial quota billing)
-  - [ ] Implement Workspace Revert (`POST /delivery/revert` pre-VCS commit)
-  - [ ] Implement Billing Checkpoint Execution (Phase 1/2/3 token tally, `billing_checkpoint_records`)
-- [ ] Phase 8: Operations, Admin RBAC, & Telemetry
-  - [ ] Implement Admin Service (`admin_accounts`, `admin_sessions`, SUPER_ADMIN/ENGINEER/SUPPORT)
-  - [ ] Implement Support Ticket Integration (`POST /api/v1/support/tickets`)
-  - [ ] Implement Webhook Processing (`POST /webhooks/payment` stripe idempotency)
+- [x] Phase 1: Platform Foundations & Core Infrastructure
+  - [x] Initialize Node.js + Fastify API (`api/` — Fastify 4, TypeScript, config, pool, logger)
+  - [x] Initialize PostgreSQL Database Schema via migration runner (`migrations/sql/0001–0010`)
+  - [x] Deploy Temporal.io Cluster (Docker Compose) and Python Worker placeholder (`docker-compose.yml`, `worker/main.py`)
+  - [x] Implement `IamaLLMRouter` (LiteLLM Python layer) inside Temporal workers (`worker/activities/`)
+  - [x] Implement `dynamic_configs` features with seed data (model.l1/l2/l3, tier_context_caps, feature flags — migration 0003)
+- [x] Phase 2: Authentication, Subscription & Billing
+  - [x] Implement Auth Service (`users`, `oauth_accounts`, `POST /register`, `POST /login`, OAuth initiate/callback with auto-merge — `api/src/routes/auth.ts`)
+  - [x] Implement JWT Lifecycle (RS256 access tokens 15min, refresh tokens 30d, dedicated `refresh_tokens` table — `api/src/lib/jwt.ts`)
+  - [x] Implement Stripe Billing Foundation (idempotent webhook, `payment_subscriptions` mirror, `subscription_tiers` as authority — `api/src/routes/webhooks.ts`, `billing.ts`)
+  - [x] Implement Quota Management (`GET /api/v1/usage/summary`, `pg_advisory_xact_lock` via `withAdvisoryLock`, two-layer daily+monthly gate — `api/src/routes/subscription.ts`, `jobs.ts`)
+- [x] Phase 3: Job Lifecycle & Context Assembly
+  - [x] Implement Job Service (`POST /api/v1/jobs`, `GET /api/v1/jobs/:job_id` with heartbeat fields — `api/src/routes/jobs.ts`)
+  - [x] Implement Heartbeat Tracker (`POST /api/v1/jobs/:job_id/heartbeat`, `client_heartbeat_sessions`, 300s grace window — `api/src/routes/jobs.ts`, `extension/src/heartbeat/HeartbeatManager.ts`)
+  - [x] Implement Context Assembly Temporal Activity (AST confidence scoring, baseline mode selection — `worker/activities/context_assembly.py`)
+  - [x] Implement SSE Log Streaming using `@microsoft/fetch-event-source` — no URL token params (`api/src/routes/jobs.ts`, `extension/src/sse/SseManager.ts`)
+- [x] Phase 4: Strategy Proposals & Specs
+  - [x] Implement Proposal Generation via L1 model (Temporal activity + workflow signal — `worker/activities/strategy_proposal.py`, `worker/workflows/refactor_job_workflow.py`)
+  - [x] Implement Spec Management (`spec_revisions`, `PATCH /spec` with `revision_token` optimistic lock, `SPEC_REVISION_CONFLICT` 409 — `api/src/routes/jobs.ts`)
+  - [x] Implement NL-to-Spec Conversion (`POST /spec/nl-convert` via L2 model Temporal signal — `api/src/routes/jobs.ts`, `worker/activities/spec_generation.py`)
+- [x] Phase 5: Test Generation & Baseline Validation
+  - [x] Implement Testing Pipelines (generate_tests + run_tests activities, idempotent ON CONFLICT DO NOTHING — `worker/activities/test_generation.py`)
+  - [x] Implement Temporal workflow state machine (BASELINE_VALIDATION gate, failure counter, fingerprint tracking — `worker/workflows/refactor_job_workflow.py`)
+  - [x] Implement entitlement snapshot before ANALYZING (invariant #10, `write_entitlement_snapshot` activity — `api/src/routes/jobs.ts`, `worker/activities/usage_recording.py`)
+- [x] Phase 6: Refactor Loop, Self-Healing & Interventions
+  - [x] Implement Patch Mechanism (LiteLLM streaming, `patch_edit_schema` only, never line-number diffs — `worker/activities/patch_generation.py`)
+  - [x] Implement Self-Healing Loop (3 identical failures → `WAITING_INTERVENTION`, attempt counter tracking — `worker/workflows/refactor_job_workflow.py`)
+  - [x] Implement Deep Fix Flow (L3 gating for MAX/Enterprise, 1800s timeout, `POST /intervention/deep-fix` — `api/src/routes/jobs.ts`)
+  - [x] Implement spec-update-during-execution signal (cancels in-flight LLM activity — workflow `specUpdatedDuringExecution` signal)
+- [x] Phase 7: Delivery, Revert & Billing Checkpoints
+  - [x] Implement Delivery Management (`GET /api/v1/jobs/:job_id/delivery`, artifact expiry — `api/src/routes/jobs.ts`)
+  - [x] Implement Delivery Application (`POST /delivery/apply` with accept_all/files/hunks partial acceptance — `api/src/routes/jobs.ts`)
+  - [x] Implement Workspace Revert (`POST /delivery/revert`, `RevertWorkflow` Temporal workflow — `api/src/routes/jobs.ts`, `worker/workflows/revert_workflow.py`)
+  - [x] Implement Billing Checkpoint via `usage_ledger` idempotent writes (invariant #7 — `worker/activities/patch_generation.py`)
+- [x] Phase 8: Operations, Admin RBAC, & Telemetry
+  - [x] Implement Admin Service (3-role RBAC: SUPER_ADMIN/ENGINEER/SUPPORT, `admin_accounts`, `admin_sessions`, separate from users — `api/src/routes/admin.ts`)
+  - [x] Implement Support Ticket Integration (metadata-only payload, consent gating — `api/src/routes/support.ts`)
+  - [x] Implement Webhook Processing (idempotent Stripe webhook — `api/src/routes/webhooks.ts`)
+  - [x] Implement Kill-switch Guard (global + per-user, 10s cache, dynamic_configs — `api/src/middleware/killSwitchGuard.ts`, `api/src/routes/admin.ts`)
+  - [x] Implement Telemetry Endpoint (PII guard, metadata-only — `api/src/routes/telemetry.ts`)
+  - [x] Implement VS Code Extension (auth, heartbeat, SSE, Command Panel intervention UI — `extension/`)
