@@ -1,0 +1,73 @@
+# IAMA V1 Development Plan
+
+This document outlines the detailed V1 development workflow and module dependency order based on the PRD, technical ADRs, and recent architectural clarifications.
+
+## 1. Development Phases Breakdown & Dependency Order
+
+### Phase 1: Platform Foundations & Core Infrastructure
+**Dependencies**: None
+- Setup Node.js + Fastify API skeleton.
+- Initialize PostgreSQL schema using migration runner (`users`, `subscription_tiers`, `dynamic_configs`, etc.).
+- Provision Temporal.io cluster (via Docker Compose for V1) and set up the Python Worker environment.
+- Integrate `IamaLLMRouter` (LiteLLM) securely within the Temporal Worker process for multi-provider routing (Anthropic/MiniMax).
+- Implement `dynamic_configs` to support dynamic model aliases, context caps, and runtime feature flags.
+
+### Phase 2: Authentication, Subscription & Billing (Stripe)
+**Dependencies**: Phase 1
+- **Auth**: Build `POST /register`, `POST /login`, and OAuth initiate/callback logic. Handle auto-merge strategy for `oauth_accounts` when verified emails match `users` table.
+- **Tokens**: Implement short-lived Access Tokens (JWT) and long-lived Refresh Tokens.
+- **Billing**: Integrate **Stripe** via `POST /webhooks/payment`. Maintain `payment_subscriptions` mirror and update `subscription_tiers` as the authoritative access control source.
+- **Quota**: Implement atomic quota reservation using `pg_advisory_xact_lock` before starting jobs, and track consumption in `usage_ledger`.
+
+### Phase 3: Job Lifecycle & Context Assembly
+**Dependencies**: Phase 2
+- **Job Creation**: `POST /api/v1/jobs` and `GET /api/v1/jobs/:job_id`.
+- **Heartbeat & Disconnects**: `POST /api/v1/jobs/:job_id/heartbeat` with 300s grace period and token stream pausing.
+- **AST Pruning Hierarchy**: 
+  1. *Client-Side*: IDE Extension performs Level 1 (direct imports) AST pruning to avoid freeing.
+  2. *Cloud-Side*: Temporal `analyzeScope` handles strict recursive dependency analysis, returning a manifest of required symbols rather than transferring large files.
+- **Tokenization Standard**: 
+  - *Pre-flight fast pass*: `tiktoken * 2.2` multiplier buffer for initial safety evaluation.
+  - *Precise routing pass*: IamaLLMRouter applies model-specific tokenizers (e.g., Anthropic SDK `count_tokens` for L2/L3, LiteLLM builtin for L1) for precise `context_cap` restriction.
+- **SSE Stream**: Implement real-time log streaming using `@microsoft/fetch-event-source`.
+
+### Phase 4: Strategy Proposals & Specs
+**Dependencies**: Phase 3
+- Generate 3-tiered proposals (Conservative, Standard, Comprehensive) using L1.
+- Track BDD/SDD iterations in `spec_revisions` using `revision_token` for strict optimistic locking (`PATCH /spec`).
+- Support `POST /spec/nl-convert` using L2 to transform plain language into structural BDD/SDD previews.
+
+### Phase 5: Test Generation & Baseline Validation
+**Dependencies**: Phase 4
+- Tests generation via L1 model (Assertion/Characterization).
+- **Asynchronous Execution & Communication Pattern**:
+  1. Temporal `runTests` activity generates a `taskToken` and throws `CompleteAsyncError()`.
+  2. API pushes `{ taskToken, testPayload }` to the IDE Extension via the SSE stream.
+  3. IDE extension runs local tests (Docker/Native).
+  4. IDE POSTs results back to `/api/v1/jobs/:job_id/tests/report` including the `taskToken`.
+  5. API securely triggers `AsyncCompletionClient.complete(taskToken, result)` to advance the Temporal Workflow.
+
+### Phase 6: Refactor Loop, Self-Healing & Interventions
+**Dependencies**: Phase 5
+- **Patch Generation**: Generate strictly typed `patch_edit_schema` AST patches using L2. (NO line-number unified diffs).
+- **Self-Healing Loop**: Enforce retry limits and monitor for 3 repeated identical error signatures to trigger `WAITING_INTERVENTION`.
+- **Deep Fix**: Implement Max/Enterprise exclusive Deep Fix via L3, ensuring heavy operations require explicit confirmation with an 1800s escalation timeout. Context purge happens on Deep Fix entry.
+
+### Phase 7: Delivery, Revert & Billing Checkpoints
+**Dependencies**: Phase 6
+- **Shadow Filesystem & Diff Presentation**: Server constructs a shadow filesystem to apply the precise `patch_edit_schema` changes and generates full modified files. IDE Extension uses native `vscode.diff()` API to display these complete files perfectly without dealing with diff offsets.
+- **Partial Acceptance & Quota Optimization**: User can do hunk-level selection. The IDE POSTs the accepted symbol/hunk list back to `/api/v1/jobs/:job_id/delivery/accept`. The backend tracks Partial Acceptance against `patch_edit_schema` and adjusts the final valid quota footprint.
+- **Revert**: Implement `POST /api/v1/jobs/:job_id/delivery/revert` reverse-patching, governed by VCS commit detection.
+
+### Phase 8: Operations, Admin RBAC, & Telemetry
+**Dependencies**: Core features of Phase 3, 5, and 6
+- Segment roles (`SUPER_ADMIN`, `ENGINEER`, `SUPPORT`) within `admin_accounts` and `admin_sessions`.
+- Implement dynamic configuration updates and kill switches (`system.kill_switch.global`).
+- Complete integration for IDE `POST /api/v1/support/tickets`.
+
+## 2. Technical Clarifications Addressed
+- **IDE vs. Cloud Test Flow**: Addressed in Phase 5 via Temporal Async Activity Completion and `taskToken` handoff.
+- **Context/Pruning**: Decoupled to client-shallow (direct imports) & cloud-deep (recursive manifest) to prevent payload latency & freezing.
+- **Token Evaluator**: Replaced plain tiktoken evaluation with a dual `tiktoken * 2.2` pre-flight buffer and `litellm.token_counter()` per-model accurate evaluation.
+- **Delivery Diffing**: Implemented Shadow FS state generation to satisfy the VS Code `vscode.diff()` API and precise hunk-level quota billing tracking.
+- **Payment Gateway**: Finalized to exclusively rely on **Stripe** for V1 operations.

@@ -1,0 +1,5 @@
+{
+  "artifactType":  "ARTIFACT_TYPE_TASK",
+  "summary":  "V1 Development Tasks with 8 distinct phases, outlining the tasks needed to build the platform, API, Temporal workflows, AST processing, Stripe billing, and Async test callbacks.",
+  "updatedAt":  "2026-02-23T08:33:19.901611200Z"
+}

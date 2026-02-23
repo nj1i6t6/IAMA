@@ -1,0 +1,615 @@
+IAMA V1 Development Plan
+Generated: 2026-02-23
+Scope: V1 only (V2 excluded)
+Status: Ready for implementation after Sprint 0 PoC completion
+
+Context
+IAMA is a greenfield project. All specifications are complete (18 documents), zero production code exists.
+This plan covers the full V1 build in dependency order, from infrastructure to IDE extension.
+
+Confirmed Technology Decisions
+Non-negotiable (per ADRs)
+Workflow engine: Temporal.io (Python SDK for workers, TypeScript SDK for Core API signals)
+LLM proxy: LiteLLM Python library + IAMA Router (in-process within Temporal Worker, never separate sidecar)
+V1 execution: Local Docker (preferred) + Local Native (fallback) — no E2B in V1
+Database: PostgreSQL 15+ + PgBouncer (transaction mode)
+Core API: Node.js + Fastify (stateless, horizontally scalable)
+Confirmed in this planning session
+Repository: Monorepo (apps/api, apps/web, apps/vscode-extension, workers/)
+Payment gateway: Stripe
+IDE surface: VS Code only (JetBrains deferred to V2)
+Local Docker execution model: VS Code Extension manages Docker directly; results relayed to cloud via Core API
+Dynamic config: PostgreSQL dynamic_configs table (no LaunchDarkly/Unleash in V1)
+Transactional email: Resend
+Production hosting: DigitalOcean — Docker Compose on Droplet (Temporal) + Managed PostgreSQL
+AST parser: Tree-sitter (Python bindings: tree-sitter + language grammars)
+Support ticketing: Skip for V1, handle manually; integrate in V2
+Product analytics: PostHog self-hosted (per PRD recommendation)
+Secret scanning: detect-secrets (Python) + custom regex patterns for common credential types
+Object storage: DigitalOcean Spaces (S3-compatible) for encrypted job_artifacts
+Encryption at rest: Application-layer AES-256 (Python cryptography library / Node.js crypto); keys stored in DigitalOcean environment variables / Docker Compose secrets (no native KMS in V1)
+Sprint 0: Complete PoC #1 and PoC #2 before starting Phase 1
+⚠️ Architectural Gap — Local Execution Result Communication
+Problem: The spec lists applyPatch and runTests as Temporal activities, but V1 execution happens locally on the user's machine (never on the cloud worker). There is currently no API endpoint in API_CONTRACT.md for the IDE Extension to report local execution results back to Temporal.
+
+The communication path that's undefined:
+
+
+Cloud Temporal workflow → ??? → IDE Extension (runs tests locally) → ??? → Temporal resumes
+Proposed resolution (needs user approval before Phase 13):
+Add two internal endpoints to the API contract:
+
+POST /api/v1/jobs/:job_id/execution/apply-result — IDE reports patch apply outcome
+POST /api/v1/jobs/:job_id/execution/test-result — IDE reports test run outcome (pass/fail, failure fingerprint, logs)
+These endpoints would:
+
+Validate job ownership + active session
+Write result to DB (test_runs, patch_attempts)
+Send Temporal signal to unblock the waiting workflow activity
+Alternative: The cloud Temporal activities (applyPatch, runTests) could use workflow.wait_condition() + signal-based blocking, with the IDE Extension sending the signal via the existing heartbeat endpoint (extended to carry execution result payload). This avoids adding new endpoints but overloads the heartbeat semantics.
+
+Decision needed before Phase 13 begins. This is flagged per AGENT_DEVELOPMENT_GUIDE.md Section 10 stop-and-escalate rule (required behavior missing from spec).
+
+Repository Structure (Monorepo)
+
+iama/
+├── apps/
+│   ├── api/                        # Node.js + Fastify (Core API)
+│   ├── web/                        # Next.js (Web portal — V1 auth/billing/history screens)
+│   └── vscode-extension/           # VS Code Extension (TypeScript)
+├── workers/                        # Python — Temporal Workers + IAMA Router
+│   ├── core/
+│   │   ├── llm/                    # IamaLLMRouter + LiteLLM integration
+│   │   ├── workflows/              # RefactorJobWorkflow, DeepFixWorkflow, RevertWorkflow
+│   │   ├── activities/             # All Temporal activity functions
+│   │   ├── context_builder/        # AST-based context assembly (Tree-sitter)
+│   │   ├── patch/                  # patch_edit_schema apply engine (PoC #2 output)
+│   │   └── sandbox/               # Local execution orchestration (see Arch Gap note above)
+│   └── run_worker.py               # Worker entry point
+├── packages/
+│   └── shared-types/               # Shared TypeScript types (API request/response shapes)
+├── migrations/                     # Forward-only PostgreSQL migrations (numbered)
+├── infra/
+│   ├── docker-compose.yml          # Dev: Temporal Server, PostgreSQL, PgBouncer, API, Worker
+│   ├── docker-compose.prod.yml     # Prod: DigitalOcean Droplet Docker Compose
+│   └── spaces/                     # DigitalOcean Spaces config (artifact storage)
+└── Docs/                           # Existing specification documents (unchanged)
+Sprint 0: Mandatory PoCs (Must Pass Before Any V1 Sprint Begins)
+Per PRD Section 20. PoC failure requires PRD re-evaluation before proceeding.
+
+PoC #1 — Dual-Language Schema Sync (Node.js ↔ Python)
+Objective: Verify that API request/response types defined in Node.js (TypeScript) and DB models used in Python workers stay consistent without manual synchronization errors.
+Approach: Evaluate OpenAPI codegen (TypeScript schema → Python Pydantic models) or Prisma with a codegen pipeline.
+Blocking: All backend sprint work.
+Deliverable: Working codegen pipeline with a sample Job model round-trip test (create in Node.js → read in Python worker without field mismatch).
+
+PoC #2 — patch_edit_schema Apply Mechanism
+Objective: Validate that EXACT_SEARCH_REPLACE applies reliably across all V1 target languages (Python 2→3, JS→TS, Java 8→21, React Class→Hooks). Then validate AST_SYMBOLIC for Python and TypeScript only.
+V1 constraint: EXACT_SEARCH_REPLACE required for ALL supported languages. AST_SYMBOLIC required only for Python + TypeScript.
+Blocking: All patch delivery and self-healing work.
+Deliverable: Test suite showing both operation types apply correctly against representative source files for each V1 language pair.
+
+Phase 1 — Infrastructure & Repository Setup
+Output: Working local dev environment. All services startable with docker compose up.
+
+Modules to Build
+Module	Description	Key Files
+docker-compose.yml	Temporal Server, PostgreSQL 15, PgBouncer, Core API	infra/docker-compose.yml
+Migration runner	Forward-only SQL migrations, numbered (0001_initial_schema.sql)	migrations/
+0001_initial_schema.sql	All V1 tables from DB_SCHEMA.md Sections 2–11, 19	migrations/
+API skeleton	Fastify app, health endpoint (GET /health), structured error middleware	apps/api/
+Worker skeleton	run_worker.py, Temporal worker registration, activity stubs	workers/
+Shared types	TypeScript interfaces for all API request/response shapes	packages/shared-types/
+CI/CD baseline	Lint, type-check, migration validation on PR	.github/workflows/
+V1 DB Tables (all created in Phase 1)
+Core (DB_SCHEMA.md §2): users, oauth_accounts, subscription_tiers, usage_ledger, quota_reservations
+Jobs (§3): projects, refactor_jobs, job_artifacts
+Spec (§4): bdd_items, sdd_items, spec_revisions
+Execution (§5): test_runs, patch_attempts, patch_edit_operations
+Audit (§6): audit_events
+Payment (§7): payment_subscriptions
+Config (§8): dynamic_configs
+Support (§9): support_ticket_logs
+Heartbeat (§10): client_heartbeat_sessions
+Billing checkpoint (§11): billing_checkpoint_records
+Admin (§19): admin_accounts, admin_sessions
+
+Schema invariants to enforce from day one (DB_SCHEMA.md §20):
+
+usage_ledger.idempotency_key UNIQUE, format {job_id}:{model_class}:{attempt_number}
+job_artifacts.encrypted = TRUE + non-null kms_key_ref + non-null expires_at on every row
+quota_reservations.idempotency_key UNIQUE
+Phase 2 — Auth & Identity (Wave 1a)
+Requirements: V1-FR-AUTH-001 through V1-FR-AUTH-004
+Depends on: Phase 1
+
+Modules to Build
+Module	Endpoints / Components
+Email/password auth	POST /api/v1/auth/register, POST /api/v1/auth/login
+Token lifecycle	POST /api/v1/auth/refresh, POST /api/v1/auth/logout
+JWT middleware	RS256 signing, 15-min access / 30-day refresh, all routes protected except /auth/* and /health
+GitHub OAuth	GET /api/v1/auth/oauth/github/initiate, GET /api/v1/auth/oauth/callback
+Google OAuth	GET /api/v1/auth/oauth/google/initiate
+OAuth email collision	Auto-merge on verified email match (agent.md Resolution 20)
+oauth_accounts writes	Create row linking provider_account_id → users.id
+Consent capture	users.consent_given_at written on first auth (V1-FR-SEC-005)
+First-run disclosure	Data-processing consent + zero-data-training disclosure before first refactor
+Key implementation rules:
+
+Passwords hashed with bcrypt (cost factor 12)
+Refresh tokens stored as hashed values in DB
+OAuth state parameter validated to prevent CSRF
+Token secrets must never use inconsistent defaults (V1-FR-AUTH-003)
+SSE sessions require seamless token refresh (V1-FR-AUTH-004): clients use @microsoft/fetch-event-source, never native EventSource
+Phase 3 — Subscription, Entitlement & Quota (Wave 1b)
+Requirements: V1-FR-SUB-001 through V1-FR-SUB-008, V1-FR-BIL-001 through V1-FR-BIL-006
+Depends on: Phase 2
+
+Modules to Build
+Module	Endpoints / Components
+Subscription endpoint	GET /api/v1/subscription/me — reads subscription_tiers (authoritative)
+Usage summary	GET /api/v1/usage/summary, GET /api/v1/usage/job/:job_id
+Tier entitlement guard	Middleware enforcing tier matrix (V1-FR-SUB-004) — context cap, execution env, model phase
+Quota reservation service	reserveQuota — pg_advisory_xact_lock + quota_reservations insert with idempotency
+Two-layer quota gate	Layer 1: daily job count < limit; Layer 2: remaining credits ≥ 10C (Free: Layer 1 only)
+Credit accounting	1C = $0.01 USD; formula: (input_tokens × input_price + output_tokens × output_price) / $0.01
+Usage display policy	Progress bar + %, human-readable proxy ("~N typical refactors remaining") — never raw credits
+Billing ledger	usage_ledger inserts with failure_class (INFRA_FAILURE, LOGIC_FAILURE, USER_CANCELLED, etc.)
+Billing checkpoint	billing_checkpoint_records for point-of-no-return at GENERATING_TESTS
+Entitlement snapshot	entitlement_snapshots written atomically before job enters ANALYZING (immutable)
+Key rules:
+
+subscription_tiers = authoritative for all access control; never use payment_subscriptions for entitlement
+Context cap: Free/Plus = 128K, Pro/Max = 200K (NOT 500K), Enterprise = 1M
+INFRA_FAILURE always dominates CLIENT_DISCONNECTED in billing (DB_SCHEMA.md Invariant 23)
+Phase 4 — Dynamic Config & Admin Console (Wave 1c)
+Requirements: V1-FR-OPS-001 through V1-FR-OPS-004
+Depends on: Phase 2
+
+Admin auth is separate from product user auth (different tables, different token lifecycle).
+
+Modules to Build
+Module	Endpoints / Components
+Admin auth	POST /api/v1/admin/auth/login, POST /api/v1/admin/auth/logout, GET /api/v1/admin/auth/me
+Admin account management	GET/POST /api/v1/admin/accounts, PATCH /api/v1/admin/accounts/:id, password reset (SUPER_ADMIN only)
+Role enforcement	SUPER_ADMIN / ENGINEER / SUPPORT — permission matrix from DB_SCHEMA.md §19
+Dynamic config API	GET /api/v1/admin/config, PUT /api/v1/admin/config/:key
+Config key namespace	model.l1/l2/l3, tier_context_caps, feature.*, system.kill_switch.*, language_matrix
+Kill switch	POST /api/v1/admin/kill-switch (global: SUPER_ADMIN+ENGINEER; per-user: also SUPPORT)
+Quota adjustment	PATCH /api/v1/admin/quota/:user_id (SUPER_ADMIN + SUPPORT)
+Health dashboard	GET /api/v1/admin/health — error rate, workflow success, model provider status, active jobs
+Config seed	Bootstrap IAMA_LLM_ROUTE_TABLE and tier_context_caps DynamicConfig entries
+Key rules:
+
+*.api_key_ref config keys require SUPER_ADMIN — NEVER store raw API keys in dynamic_configs
+Admin sessions use admin_sessions table (8-hour TTL, no refresh — re-authenticate)
+dynamic_configs.updated_by → admin_accounts.id (NOT users.id)
+Running jobs always read from entitlement_snapshots (immutable); config changes take effect on next job creation
+Phase 5 — LiteLLM + IAMA Router (Worker Foundation)
+Requirements: V1-FR-ROUTE-001 through V1-FR-ROUTE-006, V1-FR-CTX-006
+Depends on: Phase 1 (worker skeleton), Phase 4 (dynamic config)
+Language: Python (in-process within Temporal Worker)
+
+Modules to Build (workers/core/llm/)
+Module	Description
+IamaLLMRouter class	Main entry point for all LLM calls; receives { tier, stage, model_class }, resolves to provider
+Stage-to-model-class resolution	test_generation/refactor_generation → L1; repair iter 4+ → L2; Deep Fix → L3
+Entitlement gate	Reject L2 for Free; reject L3 for Free/Plus/Pro; machine-readable denial
+Token cap enforcement	Pre-call: block if context > tier cap; post-call: validate output ≤ 30K (L1) or 5K (L2/L3)
+LiteLLM acompletion() wrapper	stream=True mandatory for L1; asyncio.Task wrapping for cancellation support
+Streaming cancellation	Detect activity.is_cancelled() per chunk; cancel asyncio.Task; propagate CancelledError
+JSON repair + schema validation	jsonrepair library → schema validation → controlled retry on violation; audit event on hard failure
+Prompt caching	Cache tier 1 (1h): system prompt + dependency interfaces; Cache tier 2 (5min): BDD/SDD spec
+Prompt template injection	Safety rules, output schema constraints, role-mode controls (Simple/Professional/Enterprise)
+Audit event emission	Per call: tier, stage, model_class, cache_hit/miss, token_usage, success/failure
+patch_edit_schema enforcement	L2/L3: patch_edit_schema ONLY — full file regeneration is PROHIBITED
+Circuit breaker	Automatic fallback on provider failure (LiteLLM Router native)
+Multi-concurrent L1 limit	Max 3 concurrent L1 calls per user session
+Key rules:
+
+NEVER call Anthropic/OpenAI SDK directly — all calls go through LiteLLM
+L1 uses stream=True — must use streaming to avoid HTTP gateway timeouts on 30K output
+L3 never dispatches without explicit prior user confirmation (confirmed via Temporal signal)
+Route table loaded from IAMA_LLM_ROUTE_TABLE DynamicConfig, not hardcoded
+Phase 6 — Temporal Workflow Scaffolding
+Requirements: V1-FR-JOB-003, V1-FR-JOB-007, ADR-001
+Depends on: Phase 5
+
+Modules to Build
+Module	Description
+RefactorJobWorkflow	Main Temporal workflow class; all state transitions driven by signals + activity results
+DeepFixWorkflow	Child workflow: context purge → first-principles re-analysis → new patch → resume
+RevertWorkflow	Reverse-patch apply workflow
+Temporal signals	proposalSelected, specApproved, specUpdatedDuringExecution, escalationConfirmed, interventionAction, heartbeatReceived, forceterminate
+Activity stubs	All activity function signatures (implemented in later phases)
+Retry policies	Per-activity RetryPolicy with max_attempts, backoff, non-retryable error list
+ContinueAsNew	Phase boundary reset to avoid Temporal history size limits
+State sync to DB	All refactor_jobs.status updates go through Temporal activities (never direct SQL in API)
+Heartbeat timer	300s grace window; cloud token generation pause on heartbeat loss
+Escalation wait	workflow.wait_condition(timeout=3600s) for phase escalation confirmation
+Intervention timeout	workflow.wait_condition(timeout=1800s) for Deep Fix confirmation (agent.md Resolution 17)
+Phase 7 — Job Lifecycle API (Wave 2)
+Requirements: V1-FR-JOB-001 through V1-FR-JOB-007
+Depends on: Phase 3 (quota), Phase 6 (Temporal scaffolding)
+
+Modules to Build
+Module	Endpoints
+Job create	POST /api/v1/jobs — validates tier, execution_mode entitlement, creates refactor_jobs row (PENDING)
+Job list	GET /api/v1/jobs — owner-filtered, paginated
+Job detail	GET /api/v1/jobs/:job_id — includes heartbeat_status, grace_deadline_at, artifact_expires_at
+Job start	POST /api/v1/jobs/:job_id/start — quota reservation (distributed lock), transitions PENDING→ANALYZING, starts Temporal workflow
+Job cancel	DELETE /api/v1/jobs/:job_id — Temporal cancellation signal, status: FAILED, failure_reason: USER_CANCELLED
+Preflight check	Workspace dirty-state detection; user must explicitly choose continue/cancel (V1-FR-JOB-004)
+Ownership guard	Every endpoint verifies job.owner_id == authenticated_user_id (V1-FR-JOB-002)
+Workspace preflight	Hash snapshot of target files at job start (base hash for patch validation)
+Force terminate	POST /api/v1/jobs/:job_id/force-terminate (available during grace period)
+Key rules:
+
+Quota reservation must use pg_advisory_xact_lock before starting Temporal workflow
+execution_mode: REMOTE_SANDBOX rejected with ENTITLEMENT_DENIED for Free/Plus (server-side check)
+refactor_jobs.status is a denormalized read projection — only Temporal activities write it
+Phase 8 — SSE Log Streaming (Wave 2b)
+Requirements: V1-FR-OBS-001 through V1-FR-OBS-003, V1-FR-AUTH-004
+Depends on: Phase 6 (Temporal), Phase 7 (job lifecycle)
+
+Modules to Build
+Module	Description
+SSE endpoint	GET /api/v1/jobs/:job_id/logs — authenticated SSE stream
+Event types	state_change, log_line, attempt_start, attempt_end, heartbeat_status, deep_fix_start, artifact_ready
+Temporal → SSE bridge	Poll Temporal workflow history or use Temporal query for event sourcing to SSE stream
+Token refresh for SSE	Seamless refresh when access token expires mid-stream; no UI-visible 401 (V1-FR-AUTH-004)
+Stream resume	Client can reconnect and resume stream without losing state
+Auth enforcement	Stream only delivers to authenticated owner; @microsoft/fetch-event-source on client
+Phase 9 — Heartbeat & Orphan Detection (Wave 2c)
+Requirements: V1-FR-JOB-007
+Depends on: Phase 7 (job), Phase 8 (SSE)
+
+Modules to Build
+Module	Endpoints / Components
+Heartbeat endpoint	POST /api/v1/jobs/:job_id/heartbeat — updates client_heartbeat_sessions.last_seen_at
+Temporal heartbeat signal	Core API → Temporal signal on each heartbeat receipt
+Grace window logic	300s timer in Temporal workflow; cloud token generation pauses on first heartbeat loss
+Recovery path	If heartbeat restored within grace: workflow resumes, no terminal transition
+Orphan terminal path	Grace expiry → CLIENT_HEARTBEAT_LOST → FAILED (reason: CLIENT_DISCONNECTED)
+Billing checkpoint	Disconnect before GENERATING_TESTS → release reservation (non-billable); after → commit (billable)
+Streaming cancellation	On heartbeat loss: Temporal cancels in-flight generatePatch activity → asyncio.Task cancel → LiteLLM stream closes
+SSE heartbeat event	Stream emits heartbeat_status event with grace_deadline_at for IDE countdown UI
+10s detection SLA	Heartbeat loss must be detected and cloud token halt propagated within ≤10s
+Phase 10 — Context Builder & AST Analysis (Wave 3a)
+Requirements: V1-FR-CTX-001 through V1-FR-CTX-007
+Depends on: Phase 5 (IAMA Router), Phase 7 (job)
+Language: Python (in Temporal Worker)
+
+Modules to Build (workers/core/context_builder/)
+Module	Description
+File type allowlist	Reject binary, compiled, minified files before AST parsing (V1-FR-CTX-007)
+Line-length/entropy heuristics	Detect and reject minified bundles
+Tree-sitter AST parser	Parse target language files; calculate AST confidence score
+Confidence score calculator	round(0.40×parse_rate + 0.35×symbol_rate + 0.25×snippet_completeness)×100
+Confidence threshold routing	≥40: AST_SYMBOLIC; 20–39: Black-Box (user-overridable); <20: EXACT_SEARCH_REPLACE only
+Dependency-aware expansion	Resolve import/from/require → extract interface slices (not full implementations)
+Context manifest	Explainable manifest: selected slices + inclusion reasons (V1-FR-CTX-003)
+AST-based pruning	When context > tier cap: remove non-critical implementation bodies, preserve interface signatures + target files (V1-FR-CTX-004)
+Fail-fast overflow	If still over cap after pruning: block provider call, return actionable UI error (V1-FR-CTX-005)
+.iamaignore support	Excluded paths never read by context builder (V1-FR-SEC-004)
+Secret scanning	Run before payload leaves boundary; block on detected credentials (V1-FR-SEC-003)
+Phase 11 — Analysis, Proposals & Enterprise Report (Wave 3b)
+Requirements: V1-FR-SPEC-001, V1-FR-PRO-001, V1-FR-PRO-002, V1-FR-PRO-003
+Depends on: Phase 10 (context builder), Phase 5 (LiteLLM)
+
+Modules to Build
+Module	Endpoints / Activity
+analyzeScope activity	5-min timeout; context assembly → L1 model → scope analysis JSON
+generateProposal activity	3-min timeout; 3 proposals: CONSERVATIVE, STANDARD, COMPREHENSIVE
+Proposal endpoint	GET /api/v1/jobs/:job_id/proposals — Simple vs Professional Mode content
+Proposal select	POST /api/v1/jobs/:job_id/proposals/select → Temporal signal → WAITING_SPEC_APPROVAL
+Enterprise analysis report	GENERATING_ANALYSIS_REPORT state (Enterprise only) — technical debt, ROI, risk-adjusted timeline, dependency risk, management summary
+Report delivery	GET /api/v1/jobs/:job_id/enterprise-report (PDF + JSON artifact, 14-day TTL)
+Enterprise trial gate	Show report, pause at strategy selection, require upgrade to proceed (V1-FR-PRO-003)
+Simple Mode proposals	Plain-language impact summary; technical risk behind expand/collapse
+Professional Mode proposals	Comparative performance, breaking change surface, dependency compatibility, complexity score
+Phase 12 — Spec Management (Wave 3c)
+Requirements: V1-FR-SPEC-002 through V1-FR-SPEC-005
+Depends on: Phase 11 (proposals)
+
+Modules to Build
+Module	Endpoints
+Get spec	GET /api/v1/jobs/:job_id/spec — current BDD/SDD + revision_token
+Update spec	PATCH /api/v1/jobs/:job_id/spec — optimistic lock on revision_token; 409 on mismatch
+NL convert	POST /api/v1/jobs/:job_id/spec/nl-convert — L2 model converts plain-language to BDD/SDD preview (not committed)
+Approve spec	POST /api/v1/jobs/:job_id/spec/approve → Temporal signal → GENERATING_TESTS
+Spec revision persistence	Every update creates spec_revisions row; bdd_items/sdd_items rows linked to revision
+Revision token	UUID v4, server-generated, UNIQUE; every update request must include current token
+Spec change during execution	specUpdatedDuringExecution Temporal signal → cancel in-flight generation → WAITING_SPEC_APPROVAL → reset counters
+Fast-Track mode	Expert bypass of manual spec approval (Segment B, Pro+); implicit specs still persisted (V1-FR-SPEC-005)
+Segment A spec mode	BDD-first; SDD hidden by default; no jargon above the fold
+Phase 13 — Test Generation & Baseline Validation (Wave 4)
+Requirements: V1-FR-TEST-001 through V1-FR-TEST-009, V1-FR-SBX-001 through V1-FR-SBX-007
+Depends on: Phase 12 (spec), Phase 10 (context builder)
+
+Modules to Build
+Module	Description
+generateTests activity	L1; output: test_plan_schema; linked to current spec revision
+baselineValidation activity	Run generated tests against legacy code
+BASELINE_VALIDATION → REFACTORING	Pass condition
+BASELINE_VALIDATION → BASELINE_VALIDATION_FAILED	Fail condition; expose Quarantine/Mock Overrides controls
+Backward transition	BASELINE_VALIDATION_FAILED → WAITING_SPEC_APPROVAL (same job); reset attempt_count, identical_failure_count, failure_pattern_fingerprint atomically
+Assertion-based baseline	Standard pytest/jest-style test assertions
+Characterization/snapshot baseline	Record legacy I/O as snapshot; snapshot artifacts versioned + linked to job
+Black-Box Orchestration baseline	CLI/HTTP orchestration tests (auto-triggered when AST confidence < 40% on same-ecosystem jobs)
+Black-Box acknowledgement gate	Show uncovered behaviour count; user must explicitly acknowledge risk before proceeding
+Quarantine/Mock Override	Allow baseline proceed with explicit policy path + audit trail
+Local Docker runner	workers/core/sandbox/docker_runner.py — test execution in Docker container, separated output paths
+Local Native runner	workers/core/sandbox/native_runner.py — child process, 30s configurable timeout, forced termination
+VCS checkpoint validation	Before native execution: verify clean working tree OR stash OR committed HEAD; LOCAL_NATIVE_NO_VCS_CHECKPOINT on failure
+Side-effect warning	First-time Native mode acknowledgement required (V1-FR-SBX-006)
+Docker fallback	If Docker unavailable → graceful degrade to Local Native (V1-FR-SBX-003)
+Timeout classification	TIMEOUT_EXECUTION vs LOGIC_FAILURE — distinct retry policies (V1-FR-TEST-008)
+Timeout recovery choices	increase_timeout / skip_or_quarantine_test / continue_repair (V1-FR-SBX-007)
+Phase 14 — Refactor Loop & Self-Healing (Wave 5)
+Requirements: V1-FR-TEST-003, V1-FR-TEST-003A, V1-FR-TEST-004, V1-FR-DEL-004, V1-FR-ROUTE-003
+Depends on: Phase 13 (baseline), Phase 5 (LiteLLM), Phase 9 (heartbeat)
+
+Modules to Build
+Module	Description
+generatePatch activity	30-min timeout, 30s heartbeat interval, 90s heartbeat timeout; L1 model; streaming mandatory; cancellable on heartbeat loss
+applyPatch activity	2-min timeout; apply patch_edit_schema operations; validate base-hash before apply (V1-FR-JOB-006)
+runTests activity	15-min timeout; 1 attempt (deterministic); returns pass/fail + failure class
+patch apply engine	exact_search_replace (all V1 languages) + ast_symbolic (Python/TypeScript only per PoC #2)
+Failure fingerprint	test_names + error_class + failure_location → hash → failure_pattern_fingerprint
+Self-healing retry budget	Max 10 total attempts across all phases; count tracked in refactor_jobs.attempt_count
+Identical failure detection	3 consecutive identical fingerprints → WAITING_INTERVENTION (V1-FR-TEST-003)
+Three-phase model waterfall	iter 1–3: L1; iter 4–6: L2 (Plus+); iter 7–9: L2 escalation or L3 (Max+)
+Escalation confirmation	WAITING_ESCALATION_DECISION; timeout 3600s; pre-authorization path bypasses confirmation
+WAITING_INTERVENTION prompt	Structured panel: Deep Fix / Intervene / Continue standard repair
+patch_edit_operations	Every edit stored in DB with target_file_fingerprint, apply_anchor, apply_outcome
+Final diff reconstruction	Reconstruct from full source after edit application (never line-number-only diff)
+Three-phase model waterfall (V1-FR-ROUTE-003):
+
+
+iter 1-3:  L1 (all tiers)
+iter 4-6:  L2 (Plus and above) — on identical-failure at iter <4, WAITING_INTERVENTION takes precedence
+iter 7-9:  L2 escalation or L3 (Max/Enterprise only — requires confirmation)
+Phase 15 — Deep Fix & User Intervention (Wave 5b)
+Requirements: V1-FR-TEST-003A, V1-FR-DEL-002
+Depends on: Phase 14 (refactor loop)
+
+Modules to Build
+Module	Endpoints / Components
+Deep Fix endpoint	POST /api/v1/jobs/:job_id/intervention/deep-fix
+DeepFixWorkflow	Context purge for failing scope → first-principles re-analysis from original source + test + spec → new patch
+L3 confirmation gate	Mandatory for Max/Enterprise before L3 dispatches: % cost estimate dialog; never dispatches without explicit confirm
+Pro tier Deep Fix	Pro users get Deep Fix with L2 escalation only (no L3, no L3 confirmation dialog)
+DEEP_FIX_ACTIVE indicator	Console shows [Deep Fix active — context reset — model upgraded to L3] after confirmation
+Attempt counter reset	After Deep Fix patch: attempt_count = 0, identical_failure_count = 0, failure_pattern_fingerprint = NULL
+Intervention timeout	workflow.wait_condition(timeout=1800s); on expiry: FAILED with INTERVENTION_TIMEOUT, non-billable
+Intervene endpoint	POST /api/v1/jobs/:job_id/intervention/command — NL repair command in USER_INTERVENING state
+Manual run tests	POST /api/v1/jobs/:job_id/intervention/run-tests — structured result via SSE
+USER_INTERVENING state	Accept manual file edits + NL commands; result shown as structured block (not chat)
+Phase 16 — Delivery, Partial Accept & Revert (Wave 6)
+Requirements: V1-FR-DEL-001 through V1-FR-DEL-008
+Depends on: Phase 14 (patch), Phase 15 (intervention)
+
+Modules to Build
+Module	Endpoints
+Delivery manifest	GET /api/v1/jobs/:job_id/delivery — diff files, patch URL, expiry, baseline mode used
+Apply delivery	POST /api/v1/jobs/:job_id/delivery/apply — base-hash validation before apply
+Partial acceptance	File-level selection (all tiers); hunk-level (when unified diff available)
+Pruning-resilient apply	patch_edit_schema apply; final diff from full source (not line-number diff)
+Revert delivery	POST /api/v1/jobs/:job_id/delivery/revert — reverse-patch; blocked post-VCS-commit with POST_COMMIT_REVERT_BLOCKED + reverse_patch_url
+Complexity warning	Segment A: mandatory delayed confirmation on high-complexity logic changes (V1-FR-DEL-006)
+Artifact TTL	job_artifacts.expires_at = created_at + 14 days; display in delivery view
+Email reminder	48h before expiry for billable artifact jobs
+Artifact encryption	AES-256-class; KMS key reference in kms_key_ref; encrypted = TRUE on all rows
+artifact_ready SSE event	Emitted when job transitions to DELIVERED
+Revert audit trail	All revert and revert-blocked actions produce audit_events row
+Phase 17 — Fallback Evidence & Recovery (Wave 6b)
+Requirements: V1-FR-DEL-002, V1-FR-DEL-003, V1-FR-TEST-004
+Depends on: Phase 16 (delivery)
+
+Modules to Build
+Module	Endpoints / Components
+Fallback evidence	GET /api/v1/jobs/:job_id/fallback — failed tests, error excerpts, fingerprint, last patch summary, partial artifact URL
+Available actions	DEEP_FIX (requires_confirmation=true), INTERVENE, RETRY_STRONGER_MODEL, EDIT_SPEC, DOWNLOAD_PARTIAL, REPORT_ISSUE
+RECOVERY_PENDING	Workspace restore + patch packaging before terminal state
+FALLBACK_REQUIRED state	After successful restore; user sees structured decision panel
+Backward transition	FALLBACK_REQUIRED → WAITING_SPEC_APPROVAL ("Revise Specs and Rerun"); reset counters atomically
+Structured fallback UI data	Evidence surface (not free-form chat); inline single-line spec clarification input
+Recoverable workspace	User can restore pre-job state + inspect generated patch artifacts (V1-FR-DEL-003)
+Phase 18 — Billing & Payment (Wave 7a)
+Requirements: V1-FR-PAY-001 through V1-FR-PAY-006
+Depends on: Phase 3 (entitlement), Phase 16 (delivery)
+
+Modules to Build
+Module	Endpoints
+Billing plan	GET /api/v1/billing/plan — tier, cycle dates, upgrade options, portal URL
+Checkout	POST /api/v1/billing/checkout — Stripe/LemonSqueezy checkout session
+Payment webhook	POST /api/v1/webhooks/payment — payment_succeeded, payment_failed, subscription_cancelled, subscription_renewed; idempotent (last_webhook_event_id check)
+Quota refresh	Monthly quota refresh aligned to billing cycle; auditable records
+Usage report	GET /api/v1/billing/usage-report — overage for add-on purchase
+Watermark alerts	80% and 100% advanced quota → IDE toast alerts with upgrade/add-on links (V1-FR-PAY-006)
+Subscription sync	Webhook → update subscription_tiers; source of truth for entitlement
+Charge classification	usage_ledger.billable + failure_class — infrastructure failures = non-billable
+Phase 19 — Support & Telemetry (Wave 7b)
+Requirements: V1-FR-SUP-001 through V1-FR-SUP-005, V1-FR-ANA-001 through V1-FR-ANA-005, V1-FR-SEC-001 through V1-FR-SEC-002
+Depends on: Phase 18
+
+Modules to Build
+Module	Endpoints
+Support ticket	POST /api/v1/support/tickets — one-click from FAILED/FALLBACK_REQUIRED; prefilled job metadata
+Ticket payload policy	Default: METADATA_ONLY; Enterprise: WITH_CONTEXT only with admin override + audit
+Redacted logs	Auto-pack redacted logs/traces; sensitive fields masked before leaving IAMA
+Consent gate	User must consent before sending prompt/error context to support
+Telemetry events	POST /api/v1/telemetry/events — metadata-only; server rejects prohibited content
+Zero Telemetry Mode	Enterprise org flag zero_telemetry_mode = true → middleware drops all behavior fields
+Product analytics	Server-side events: job_started, baseline_passed, fallback_triggered, job_delivered
+Transactional email	Welcome, payment receipt, quota exhaustion, suspicious login alerts
+Account deletion	POST /api/v2/compliance/data-erasure (planned for V2; V1: soft-delete via users.deleted_at)
+Secret detection	Block .env, AWS key patterns, etc. before payload leaves boundary
+Phase 20 — VS Code Extension (IDE Surface)
+Requirements: V1-FR-JOB-007 (heartbeat), Section 14 (UX), UX-WIREFRAME-IDE.md
+Depends on: Phases 2–19 (all backend APIs must be available)
+Language: TypeScript (VS Code Extension API)
+
+Modules to Build
+Module	Description
+Extension scaffold	VS Code Extension API, webview panel setup
+Auth flow	Login button → open browser → OAuth callback → token returned to extension; token storage in SecretStorage API
+Execution profile setup	First-run: Local Docker (recommended) vs Local Native; risk labels for Segment A
+Job setup panel	File/folder picker, preflight check display, refactor context input
+Strategy proposal view	3 cards (Conservative/Standard/Comprehensive) with 5-segment risk bars; Segment A: plain-language
+Spec Workbench	BDD/SDD natural-language editor; revision history timeline; SDD hidden by default (Segment A)
+Execution console	Stage progress timeline, attempt log (color-coded), model route display, cancel button
+SSE client	@microsoft/fetch-event-source (NOT native EventSource); seamless token refresh
+Heartbeat sender	30s interval; POST /api/v1/jobs/:job_id/heartbeat
+Grace period UI	Real-time countdown mm:ss, "Force Terminate" action available during grace
+WAITING_INTERVENTION panel	Structured panel: Deep Fix / Intervene / Continue buttons
+Deep Fix confirmation dialog	% cost estimate; cannot cancel once started; explicit confirm required
+User intervention panel	Command panel (> monospace input) + structured result block output (NOT chat bubbles)
+Delivery diff view	File-level and hunk-level checkboxes; artifact expiry date visible; Segment A: complexity warning
+Fallback intervention workspace	Evidence surface + 6 action buttons; optional inline spec clarification input
+Usage summary drawer	Progress bar + % + human-readable proxy; hover reveals credit detail
+.iamaignore support	Extension reads ignore file; excluded paths never passed to context builder
+Preflight — Segment A	Only "Continue (safe mode)" or "Cancel" — no raw git output
+Design system	Lucide icons throughout; semantic color tokens; no emoji in functional UI; no chat bubbles
+Phase 21 — Web Portal (V1 Screens)
+Requirements: V1-FR-SUB-001 (plan), V1-FR-AUTH-002 (OAuth)
+Depends on: Phases 2–19 (all backend APIs)
+Language: TypeScript + Next.js (React)
+
+V1 Web Screens (only these — V2 screens are out of scope)
+Screen	Description
+Sign in / Register	Email/password form; GitHub/Google OAuth buttons
+Plan and Billing	Current tier, entitlements table, usage bars (% only, no raw credits), invoice history, upgrade CTA, Stripe portal link
+Job History	Filter by status/date; job rows with strategy/spec/duration/actions (View/Revert)
+Account Security	Password change, session management, data deletion request, telemetry opt-out toggle
+Phase 22 — QA, Testing & Acceptance
+Depends on: All phases above
+References: PRD Section 17 (33 QA test groups)
+
+Required Test Coverage
+Test Domain	Key Cases
+Auth flows	Registration, login, refresh, OAuth callback, email collision auto-merge
+Entitlement enforcement	Each tier: model class gate, context cap, execution environment, web/GitHub gate
+Ownership isolation	User A cannot read/mutate User B jobs
+Quota race prevention	2 concurrent requests for last quota slot → exactly 1 succeeds
+Idempotency	Same idempotency_key twice → second returns replayed response
+State machine transitions	All canonical transitions; illegal transitions blocked
+WAITING_INTERVENTION trigger	Exactly 3 identical consecutive failures (not 2, not 4)
+Backward transitions	BASELINE_VALIDATION_FAILED → WAITING_SPEC_APPROVAL with counter reset
+Deep Fix gate	L3 never dispatches without confirmation; Pro gets L2 only
+Heartbeat/disconnect	300s grace window; recovery within grace; terminal after expiry
+Billing checkpoints	Pre-GENERATING_TESTS disconnect = non-billable; post = billable
+INFRA_FAILURE billing precedence	Simultaneous infra failure + disconnect → non-billable
+Patch apply	base-hash conflict blocks apply; patch_edit_schema applies correctly
+Context allowlist	Binary/compiled/minified files blocked before AST parsing
+Timeout classification	TIMEOUT_EXECUTION ≠ LOGIC_FAILURE; distinct retry policy
+Token cap + pruning	Over-cap context pruned correctly; target files unpruned
+Prompt caching	Cache hit/miss recorded in telemetry
+Secret scanning	.env and AWS key patterns blocked before payload leaves boundary
+SSE token refresh	Token expiry mid-stream → seamless refresh, no UI 401
+Admin RBAC	ENGINEER cannot change api_key_ref; SUPPORT cannot set global kill switch
+Encryption at rest	All job_artifacts rows have encrypted=TRUE + valid kms_key_ref
+Artifact TTL	Hard-delete after 14 days; metadata retained
+Enterprise Zero Telemetry	No behavior fields in telemetry when zero_telemetry_mode=true
+Payment webhook idempotency	Same event processed twice → no double quota grant
+AST confidence routing	Score ≥40 → AST_SYMBOLIC; 20–39 → Black-Box; <20 → EXACT_SEARCH_REPLACE
+Module Dependency Graph (Summary)
+
+Phase 1 (Infrastructure)
+  └─→ Phase 2 (Auth)
+        └─→ Phase 3 (Subscription/Quota)
+              ├─→ Phase 4 (Admin/Config)
+              └─→ Phase 7 (Job Lifecycle)
+                    ├─→ Phase 8 (SSE Streaming)
+                    └─→ Phase 9 (Heartbeat)
+
+Phase 1 (Infrastructure)
+  └─→ Phase 5 (LiteLLM + IAMA Router)
+        └─→ Phase 6 (Temporal Scaffolding)
+              ├─→ Phase 10 (Context Builder)
+              │     └─→ Phase 11 (Analysis/Proposals)
+              │           └─→ Phase 12 (Spec Management)
+              │                 └─→ Phase 13 (Test Gen + Baseline)
+              │                       └─→ Phase 14 (Refactor Loop)
+              │                             └─→ Phase 15 (Deep Fix/Intervention)
+              │                                   └─→ Phase 16 (Delivery)
+              │                                         └─→ Phase 17 (Fallback)
+              │                                               └─→ Phase 18 (Billing)
+              │                                                     └─→ Phase 19 (Support/Telemetry)
+              └─→ Phase 7 (Job Lifecycle) [also depends on Phase 3]
+
+Phase 19 (all backend complete)
+  ├─→ Phase 20 (VS Code Extension)
+  ├─→ Phase 21 (Web Portal V1)
+  └─→ Phase 22 (QA & Acceptance)
+
+Sprint 0 PoCs (must pass before Phase 5+):
+  PoC #1 → Unblocks all backend sprint work
+  PoC #2 → Unblocks Phase 14 (Refactor Loop)
+Open Questions (Must Resolve Before Implementation Begins)
+A. Repository & Stack Decisions
+A1. Monorepo or polyrepo?
+Plan assumes monorepo (apps/ + workers/ + packages/). Confirm this approach, or specify preferred structure.
+
+A2. Python version for Temporal workers?
+Docs reference temporalio Python SDK. What Python version? (3.11 or 3.12 recommended for asyncio performance)
+
+A3. Node.js version for Core API?
+Fastify works best on Node.js 20 LTS or 22 LTS. Confirm.
+
+B. Third-Party Service Decisions (PRD mentions options but does not choose)
+B1. Payment gateway: Stripe or LemonSqueezy?
+Both are listed as options. A choice must be made before Phase 18. Which one?
+
+B2. Dynamic config store: LaunchDarkly or Unleash (self-hosted)?
+PRD recommends both for feature flags + kill switch. Unleash = self-hosted + no vendor cost; LaunchDarkly = managed + SaaS cost.
+For V1, dynamic_configs PostgreSQL table is the minimal baseline. Does the user want an additional feature flag system on top, or is the DB table sufficient for V1?
+
+B3. Support ticketing: Zendesk, Intercom, or Jira Service Management?
+V1-FR-SUP-001 requires integration with one provider. Which one?
+
+B4. Transactional email provider?
+V1-FR-SEC-001 requires transactional email (welcome, payment receipt, quota alerts). Provider not specified. Options: Postmark, SendGrid, AWS SES, Resend.
+
+B5. Product analytics: PostHog self-hosted?
+PRD recommends PostHog self-hosted. Confirm, or is a different system preferred?
+
+C. IDE Extension Scope
+C1. V1 is VS Code only, correct?
+Service architecture diagram mentions JetBrains, but V1 PRD Section 14.3 only defines VS Code screens. JetBrains appears to be V2+. Please confirm VS Code only for V1.
+
+D. Technical Architecture Clarifications
+D1. AST parser: Tree-sitter confirmed?
+The PRD references "Tree-sitter AST analysis layer" and "Tree-sitter confidence." Confirm Tree-sitter is the chosen library for AST parsing (Python bindings: tree-sitter).
+
+D2. Secret scanning library?
+V1-FR-SEC-003 requires secret scanning before payload leaves IDE/backend. Which library? Options: detect-secrets (Python), truffleHog, custom regex patterns.
+
+D3. Local Docker test runner — communication method?
+When the Temporal Worker needs to run tests in Local Docker on the user's machine, how does the worker communicate with the user's Docker daemon? Options:
+
+Docker SDK in the IDE Extension (extension manages Docker, worker gets results via heartbeat/SSE)
+Worker instructs IDE extension to run Docker via a reverse channel This is architecturally significant. Need clarification.
+D4. Hosting / deployment target for V1 production?
+The docs describe Kubernetes for production. For V1, what's the target cloud platform? AWS, GCP, self-hosted, or Docker Compose only for now?
+
+D5. KMS / encryption at rest: which key management service?
+DB_SCHEMA.md requires kms_key_ref on all code-bearing artifacts. Service architecture says "AWS Secrets Manager (or equivalent)." Is AWS KMS the chosen KMS, or a different system?
+
+E. Development Process
+E1. Who builds what? Backend first, or frontend + backend in parallel?
+The phases above assume backend-first, then IDE extension. Is this the intended approach, or will there be parallel teams?
+
+E2. Should Sprint 0 PoCs be done before any other planning/coding?
+PRD Section 20 states PoC failure requires PRD re-evaluation. Do you want to start Sprint 0 PoCs immediately, or proceed with Phase 1 infrastructure in parallel?
+
+Notes on V1–V2 Compatibility (V2 Prep in V1)
+The following V1 design decisions must not be changed later to accommodate V2 (already included in the plan above):
+
+refactor_jobs.execution_mode field added in V1 migration (ADR-003)
+spec_revisions.revision_token optimistic lock (required for V2 cross-surface sync)
+entitlement_snapshots written atomically before ANALYZING (required for V2 billing subject)
+Temporal workflow signal architecture supports V2 remote sandbox worker addition without refactoring V1 activities
+SSE stream authentication via @microsoft/fetch-event-source (required for V2 web surface)
+oauth_accounts table separate from repository_connections (V2 needs both)

@@ -1,0 +1,40 @@
+# IAMA V1 Development Tasks
+
+- [ ] Phase 1: Platform Foundations & Core Infrastructure
+  - [ ] Initialize Node.js + Fastify API
+  - [ ] Initialize PostgreSQL Database Schema via migration runner
+  - [ ] Deploy Temporal.io Cluster (Docker Compose) and Python Worker placeholder
+  - [ ] Implement `IamaLLMRouter` (LiteLLM Python layer) inside Temporal workers
+  - [ ] Implement `dynamic_configs` features (model.l1, tier_context_caps, feature flags)
+- [ ] Phase 2: Authentication, Subscription & Billing
+  - [ ] Implement Auth Service (`users`, `oauth_accounts`, `POST /register`, `POST /login`, OAuth initiate/callback with auto-merge)
+  - [ ] Implement JWT Lifecycle (access vs refresh tokens)
+  - [ ] Implement Stripe Billing Foundation (`payment_subscriptions` mirror, `subscription_tiers` enforcement)
+  - [ ] Implement Quota Management (`GET /api/v1/usage/summary`, `pg_advisory_xact_lock` for usage_ledger)
+- [ ] Phase 3: Job Lifecycle & Context Assembly
+  - [ ] Implement Job Service (`POST /api/v1/jobs`, `GET /api/v1/jobs/:job_id`)
+  - [ ] Implement Heartbeat Tracker (`POST /api/v1/jobs/:job_id/heartbeat`, 300s grace window)
+  - [ ] Implement Context Slices & Two-Level AST Pruning (Extension Level 1 + Cloud `analyzeScope` level 2)
+  - [ ] Implement Pre-flight Token Calculation (tiktoken x 2.2 buffer) & Per-Model LiteLLM Counter
+  - [ ] Implement SSE Log Streaming (`@microsoft/fetch-event-source` pattern)
+- [ ] Phase 4: Strategy Proposals & Specs
+  - [ ] Implement Proposal Generation via L1 model (Conservative, Standard, Comprehensive)
+  - [ ] Implement Spec Management (`spec_revisions`, `PATCH /spec` with `revision_token` optimistic lock)
+  - [ ] Implement NL-to-Spec Conversion (`POST /spec/nl-convert` via L2 model)
+- [ ] Phase 5: Test Generation & Baseline Validation
+  - [ ] Implement Testing Pipelines (L1 model, Assertion & Characterization, Black-Box fallback)
+  - [ ] Implement Temporal Async Activity Completion (TaskToken generation -> IDE SSE -> IDE Extension execution)
+  - [ ] Implement IDE Test Reporting (`POST /sandbox/report` -> API `AsyncCompletionClient.complete`)
+- [ ] Phase 6: Refactor Loop, Self-Healing & Interventions
+  - [ ] Implement Patch Mechanism (L2 model, `patch_edit_schema` strict enforcement)
+  - [ ] Implement Self-Healing Loop (3 identical errors -> `WAITING_INTERVENTION` trigger)
+  - [ ] Implement Deep Fix Flow (L3 model via `POST /intervention/deep-fix`, 1800s timeout)
+- [ ] Phase 7: Delivery, Revert & Billing Checkpoints
+  - [ ] Implement Delivery Management (Shadow FS Diff, `vscode.diff()` compatible delivery artifact)
+  - [ ] Implement Delivery Application (`POST /api/v1/jobs/:job_id/delivery/accept`, accept hunk symbols, partial quota billing)
+  - [ ] Implement Workspace Revert (`POST /delivery/revert` pre-VCS commit)
+  - [ ] Implement Billing Checkpoint Execution (Phase 1/2/3 token tally, `billing_checkpoint_records`)
+- [ ] Phase 8: Operations, Admin RBAC, & Telemetry
+  - [ ] Implement Admin Service (`admin_accounts`, `admin_sessions`, SUPER_ADMIN/ENGINEER/SUPPORT)
+  - [ ] Implement Support Ticket Integration (`POST /api/v1/support/tickets`)
+  - [ ] Implement Webhook Processing (`POST /webhooks/payment` stripe idempotency)

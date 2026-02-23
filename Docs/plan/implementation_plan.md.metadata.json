@@ -1,0 +1,5 @@
+{
+  "artifactType":  "ARTIFACT_TYPE_IMPLEMENTATION_PLAN",
+  "summary":  "Detailed V1 Development Plan based on PRD, API Contract, DB Schema and user clarifications regarding Temporal taskToken, Client/Cloud AST Pruning, Per-model Tokenization, and Shadow FS delivery.",
+  "updatedAt":  "2026-02-23T08:33:19.820636900Z"
+}

@@ -1,0 +1,165 @@
+version: "3.9"
+
+services:
+  # ─── PostgreSQL ───────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-iama}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-iama_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-iama_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-iama} -d ${POSTGRES_DB:-iama_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Temporal also needs its own DB (separate database in same PG instance)
+  postgres_temporal:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${TEMPORAL_DB_USER:-temporal}
+      POSTGRES_PASSWORD: ${TEMPORAL_DB_PASSWORD:-temporal_secret}
+      POSTGRES_DB: ${TEMPORAL_DB:-temporal}
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_temporal_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${TEMPORAL_DB_USER:-temporal} -d ${TEMPORAL_DB:-temporal}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── PgBouncer ────────────────────────────────────────────────────────────
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: "postgres://${POSTGRES_USER:-iama}:${POSTGRES_PASSWORD:-iama_secret}@postgres:5432/${POSTGRES_DB:-iama_db}"
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 200
+      DEFAULT_POOL_SIZE: 20
+    ports:
+      - "5435:5432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ─── Temporal Server ──────────────────────────────────────────────────────
+  temporal:
+    image: temporalio/auto-setup:1.23.0
+    restart: unless-stopped
+    depends_on:
+      postgres_temporal:
+        condition: service_healthy
+    environment:
+      - DB=postgres12
+      - DB_PORT=5432
+      - POSTGRES_USER=${TEMPORAL_DB_USER:-temporal}
+      - POSTGRES_PWD=${TEMPORAL_DB_PASSWORD:-temporal_secret}
+      - POSTGRES_SEEDS=postgres_temporal
+      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development.yaml
+    ports:
+      - "7233:7233"
+    volumes:
+      - ./temporal-config:/etc/temporal/config/dynamicconfig
+    healthcheck:
+      test: ["CMD", "tctl", "--address", "temporal:7233", "cluster", "health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  temporal_ui:
+    image: temporalio/ui:latest
+    restart: unless-stopped
+    depends_on:
+      - temporal
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: "http://localhost:3000"
+    ports:
+      - "8080:8080"
+
+  # ─── Migration Runner ─────────────────────────────────────────────────────
+  migrate:
+    build:
+      context: ./migrations
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: "postgres://${POSTGRES_USER:-iama}:${POSTGRES_PASSWORD:-iama_secret}@postgres:5432/${POSTGRES_DB:-iama_db}?sslmode=disable"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  # ─── Core API (Node.js / Fastify) ─────────────────────────────────────────
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3000
+      DATABASE_URL: "postgres://${POSTGRES_USER:-iama}:${POSTGRES_PASSWORD:-iama_secret}@pgbouncer:5432/${POSTGRES_DB:-iama_db}"
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
+      JWT_PRIVATE_KEY_PATH: /run/secrets/jwt_private_key
+      JWT_PUBLIC_KEY_PATH: /run/secrets/jwt_public_key
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      API_BASE_URL: ${API_BASE_URL:-http://localhost:3000}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./api/src:/app/src
+      - jwt_keys:/run/secrets
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      temporal:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ─── Temporal Worker (Python) ─────────────────────────────────────────────
+  worker:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
+      TEMPORAL_TASK_QUEUE: ${TEMPORAL_TASK_QUEUE:-iama-main-queue}
+      DATABASE_URL: "postgres://${POSTGRES_USER:-iama}:${POSTGRES_PASSWORD:-iama_secret}@pgbouncer:5432/${POSTGRES_DB:-iama_db}"
+      LITELLM_API_BASE: ${LITELLM_API_BASE:-http://localhost:4000}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - ./worker:/app
+    depends_on:
+      temporal:
+        condition: service_started
+      pgbouncer:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  postgres_temporal_data:
+  jwt_keys:
